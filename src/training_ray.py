@@ -122,7 +122,7 @@ if __name__ == '__main__':
     )
 
     # Gets best trial based on max accuracy across all training iterations.
-    best_trial = analysis.get_best_trial("episode_reward_mean", mode="max") 
+    best_trial = analysis.get_best_trial("episode_reward_mean", mode="max")
     print(best_trial)
     # Gets best checkpoint for trial based on accuracy.
     best_checkpoint = analysis.get_best_checkpoint(

@@ -24,6 +24,7 @@ from ray.tune.utils import merge_dicts
 from ray.tune.registry import get_trainable_cls, _global_registry, ENV_CREATOR
 
 import rlgym
+from rlgym.gamelaunch import LaunchPreference
 from rlgym.utils.obs_builders import AdvancedObs
 from rlgym.utils.reward_functions import CombinedReward
 from rlgym.utils.reward_functions.common_rewards import *
@@ -63,6 +64,7 @@ ENV_CONFIG = {
     "self_play": True,
     "team_size": 1,
     "game_speed": 1,
+    "launch_preference": LaunchPreference.STEAM,
     "obs_builder": AdvancedObs(),
     "reward_fn": CombinedReward(
         (
