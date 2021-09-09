@@ -14,6 +14,7 @@ from ray.tune.logger import pretty_print
 from ray.tune.integration.wandb import WandbLoggerCallback
 
 import rlgym
+from rlgym.gamelaunch import LaunchPreference
 from rlgym.utils.obs_builders import AdvancedObs
 from rlgym.utils.reward_functions import CombinedReward
 from rlgym.utils.reward_functions.common_rewards import *
@@ -31,6 +32,7 @@ ENV_CONFIG = {
     "self_play": True,
     "team_size": 1,
     "game_speed": 1,
+    "launch_preference": LaunchPreference.STEAM,
     "obs_builder": AdvancedObs(),
     "reward_fn": CombinedReward(
         (
@@ -67,17 +69,15 @@ def json_dumper(obj):
 if __name__ == '__main__':
     ray.init(address='auto', _redis_password='5241590000000000', logging_level=logging.DEBUG)
 
-
     def create_env(env_config):
         return RLLibEnv(rlgym.make(**ENV_CONFIG))
-
 
     register_env("RLGym", create_env)
 
     policy = PPOTorchPolicy, Box(-np.inf, np.inf, (107,)), Box(-1.0, 1.0, (8,)), {}
     # policy = SACTorchPolicy, Box(-np.inf, np.inf, (107,)), Box(-1.0, 1.0, (8,)), {}
     # policy = PPOTorchPolicy, Box(-np.inf, np.inf, (4,)), Discrete(2), {}
-    
+
     analysis = tune.run(
         "PPO",
         name="PPO_multiagent_2",
@@ -146,6 +146,10 @@ if __name__ == '__main__':
     best_trial = analysis.get_best_trial("episode_reward_mean", mode="max") 
     print(best_trial)
     # Gets best checkpoint for trial based on accuracy.
-    best_checkpoint = analysis.get_best_checkpoint(trial=best_trial, metric="episode_reward_mean", mode="max")
+    best_checkpoint = analysis.get_best_checkpoint(
+        trial=best_trial,
+        metric="episode_reward_mean",
+        mode="max"
+    )
     print(best_checkpoint)
     print("Done training")
