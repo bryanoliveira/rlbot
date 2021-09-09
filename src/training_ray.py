@@ -1,18 +1,12 @@
 import logging
-import os
-import json
 
 import numpy as np
 import ray
 from gym.spaces import Box, Discrete
 from ray.rllib.agents.sac import SACTorchPolicy
-from ray.rllib.agents.ppo import PPOTorchPolicy, PPOTrainer, APPOTrainer
-from ray.rllib.examples.env.multi_agent import MultiAgentCartPole
+from ray.rllib.agents.ppo import PPOTorchPolicy
 from ray import tune
 from ray.tune import register_env
-from ray.tune.logger import pretty_print
-from ray.tune.integration.wandb import WandbLoggerCallback
-
 import rlgym
 from rlgym.gamelaunch import LaunchPreference
 from rlgym.utils.obs_builders import AdvancedObs
@@ -31,8 +25,8 @@ MAX_EP_STEPS = int(round(MAX_EP_SECS * PHYSICS_TICKS_PER_SECOND / DEFAULT_TICK_S
 ENV_CONFIG = {
     "self_play": True,
     "team_size": 1,
-    "game_speed": 1,
-    "launch_preference": LaunchPreference.STEAM,
+    "game_speed": 100,
+    "launch_preference": LaunchPreference.EPIC,
     "obs_builder": AdvancedObs(),
     "reward_fn": CombinedReward(
         (
@@ -123,21 +117,6 @@ if __name__ == '__main__':
         checkpoint_freq=100,
         checkpoint_at_end=True,
         local_dir="./ray_results",
-        callbacks=[
-            # WandbLoggerCallback(
-            #     project="ray-rlbot",
-            #     log_config=True,
-            #     config={
-            #         "wandb": {
-            #             "settings": {
-            #                 "start_method": "spawn"
-            #             },
-            #         },
-            #         "max_ep_secs": MAX_EP_SECS,
-            #         "env_config": json.loads(json.dumps(ENV_CONFIG, default=json_dumper)),
-            #     }
-            # )
-        ]
         # restore="./ray_results/...",
         # resume=True,
     )
