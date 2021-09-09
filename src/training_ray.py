@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 
 import numpy as np
 import ray
@@ -10,6 +11,7 @@ from ray.rllib.examples.env.multi_agent import MultiAgentCartPole
 from ray import tune
 from ray.tune import register_env
 from ray.tune.logger import pretty_print
+from ray.tune.integration.wandb import WandbLoggerCallback
 
 import rlgym
 from rlgym.utils.obs_builders import AdvancedObs
@@ -17,40 +19,49 @@ from rlgym.utils.reward_functions import CombinedReward
 from rlgym.utils.reward_functions.common_rewards import *
 from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition, GoalScoredCondition
 from rlgym_tools.rllib_utils import RLLibEnv
+import wandb
+from reward import TimeLeftEventReward
+
 
 MAX_EP_SECS = 10
 DEFAULT_TICK_SKIP = 8
 PHYSICS_TICKS_PER_SECOND = 120
 MAX_EP_STEPS = int(round(MAX_EP_SECS * PHYSICS_TICKS_PER_SECOND / DEFAULT_TICK_SKIP))
+ENV_CONFIG = {
+    "self_play": True,
+    "team_size": 1,
+    "game_speed": 100,
+    "obs_builder": AdvancedObs(),
+    "reward_fn": CombinedReward(
+        (
+            TimeLeftEventReward(goal=1, concede=-1, shot=0.01, save=0.01),
+            # LiuDistanceBallToGoalReward(),
+            VelocityBallToGoalReward(),
+            # RewardIfBehindBall(TouchBallReward()),
+            # LiuDistancePlayerToBallReward(),
+            # VelocityPlayerToBallReward(),
+            # AlignBallGoal(),
+            # RewardIfBehindBall(FaceBallReward()),
+            # VelocityReward(),
+            ConstantReward(),
+        ),
+        (1, 1, -0.01)
+    ),
+    "terminal_conditions": (TimeoutCondition(MAX_EP_STEPS), GoalScoredCondition()),
+}
 
-
-class CustomEventReward(EventReward):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.timestep = 0
-
-    def reset(self, *args, **kwargs):
-        super().reset(*args, **kwargs)
-        self.timestep = 0
-
-    def get_reward(self, player: PlayerData, state: GameState, previous_action: np.ndarray, optional_data=None):
-        self.timestep += 1
-
-        old_values = self.last_registered_values[player.car_id]
-        new_values = self._extract_values(player, state)
-
-        diff_values = new_values - old_values
-        diff_values[diff_values < 0] = 0  # We only care about increasing values
-
-        # copy original weights
-        weights = np.array(self.weights)
-        # weight goal reward by the remaining timesteps
-        weights[0] *= MAX_EP_STEPS - self.timestep
-        weights[2] *= MAX_EP_STEPS - self.timestep
-        reward = np.dot(weights, diff_values)
-
-        self.last_registered_values[player.car_id] = new_values
-        return reward
+def json_dumper(obj):
+    """
+    Dumps generic objects to JSON. Useful to serialize ENV_CONFIG.
+    """
+    # extra hacky, but works
+    try:
+        return obj.toJSON()
+    except:
+        try:
+            return obj.__dict__
+        except:
+            return str(obj)
 
 
 if __name__ == '__main__':
@@ -58,29 +69,7 @@ if __name__ == '__main__':
 
 
     def create_env(env_config):
-        return RLLibEnv(
-            rlgym.make(
-                self_play=True,
-                game_speed=100,
-                obs_builder=AdvancedObs(),
-                reward_fn=CombinedReward(
-                    (
-                        CustomEventReward(goal=1, concede=-1, shot=0.01, save=0.01),
-                        # LiuDistanceBallToGoalReward(),
-                        VelocityBallToGoalReward(),
-                        # RewardIfBehindBall(TouchBallReward()),
-                        # LiuDistancePlayerToBallReward(),
-                        # VelocityPlayerToBallReward(),
-                        # AlignBallGoal(),
-                        # RewardIfBehindBall(FaceBallReward()),
-                        # VelocityReward(),
-                        ConstantReward(),
-                    ),
-                    (1, 1, -0.01)
-                ),
-                terminal_conditions=(TimeoutCondition(MAX_EP_STEPS), GoalScoredCondition()),
-            )
-        )
+        return RLLibEnv(rlgym.make(**ENV_CONFIG))
 
 
     register_env("RLGym", create_env)
@@ -132,6 +121,21 @@ if __name__ == '__main__':
         checkpoint_freq=100,
         checkpoint_at_end=True,
         local_dir="./ray_results",
+        callbacks=[
+            # WandbLoggerCallback(
+            #     project="ray-rlbot",
+            #     log_config=True,
+            #     config={
+            #         "wandb": {
+            #             "settings": {
+            #                 "start_method": "spawn"
+            #             },
+            #         },
+            #         "max_ep_secs": MAX_EP_SECS,
+            #         "env_config": json.loads(json.dumps(ENV_CONFIG, default=json_dumper)),
+            #     }
+            # )
+        ]
         # restore="./ray_results/...",
         # resume=True,
     )
