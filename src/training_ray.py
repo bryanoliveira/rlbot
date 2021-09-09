@@ -26,22 +26,23 @@ ENV_CONFIG = {
     "self_play": True,
     "team_size": 1,
     "game_speed": 100,
-    "launch_preference": LaunchPreference.EPIC,
+    "launch_preference": LaunchPreference.STEAM,
     "obs_builder": AdvancedObs(),
     "reward_fn": CombinedReward(
         (
             TimeLeftEventReward(goal=1, concede=-1, shot=0.01, save=0.01),
-            # LiuDistanceBallToGoalReward(),
             VelocityBallToGoalReward(),
+            RewardIfFacingBall(VelocityPlayerToBallReward()),
+            ConstantReward(),
+
+            # LiuDistanceBallToGoalReward(),
             # RewardIfBehindBall(TouchBallReward()),
             # LiuDistancePlayerToBallReward(),
-            RewardIfFacingBall(VelocityPlayerToBallReward()),
             # AlignBallGoal(),
             # RewardIfBehindBall(FaceBallReward()),
             # VelocityReward(),
-            ConstantReward(),
         ),
-        (1, 5, 0.05, -0.1)
+        (5, 5, 0.05, -0.1)
     ),
     "terminal_conditions": (TimeoutCondition(MAX_EP_STEPS), GoalScoredCondition()),
 }
@@ -76,7 +77,7 @@ if __name__ == '__main__':
         "PPO",
         name="PPO_multiagent_2",
         # "SAC",
-        # name="SAC_multiagent_2",
+        # name="SAC_multiagent_3",
         config={
             # system settings
             "num_gpus": 1,
@@ -109,6 +110,27 @@ if __name__ == '__main__':
             # "sgd_minibatch_size": 500,
             # "num_sgd_iter": 10,
             # "batch_mode": "truncate_episodes",
+            "exploration_config": {
+                "type": "Curiosity",  # <- Use the Curiosity module for exploring.
+                "eta": 1.0,  # Weight for intrinsic rewards before being added to extrinsic ones.
+                "lr": 0.001,  # Learning rate of the curiosity (ICM) module.
+                "feature_dim": 288,  # Dimensionality of the generated feature vectors.
+                # Setup of the feature net (used to encode observations into feature (latent) vectors).
+                "feature_net_config": {
+                    "fcnet_hiddens": [],
+                    "fcnet_activation": "relu",
+                },
+                "inverse_net_hiddens": [256],  # Hidden layers of the "inverse" model.
+                "inverse_net_activation": "relu",  # Activation of the "inverse" model.
+                "forward_net_hiddens": [256],  # Hidden layers of the "forward" model.
+                "forward_net_activation": "relu",  # Activation of the "forward" model.
+                "beta": 0.2,  # Weight for the "forward" loss (beta) over the "inverse" loss (1.0 - beta).
+                # Specify, which exploration sub-type to use (usually, the algo's "default"
+                # exploration, e.g. EpsilonGreedy for DQN, StochasticSampling for PG/SAC).
+                "sub_exploration": {
+                    "type": "StochasticSampling",
+                }
+            }
         },
         stop={
             "training_iteration": 10000,
