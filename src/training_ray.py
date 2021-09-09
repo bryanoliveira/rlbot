@@ -39,13 +39,13 @@ ENV_CONFIG = {
             VelocityBallToGoalReward(),
             # RewardIfBehindBall(TouchBallReward()),
             # LiuDistancePlayerToBallReward(),
-            # VelocityPlayerToBallReward(),
+            VelocityPlayerToBallReward(),
             # AlignBallGoal(),
             # RewardIfBehindBall(FaceBallReward()),
             # VelocityReward(),
             ConstantReward(),
         ),
-        (1, 1, -0.01)
+        (1, 1, 0.05, -0.01)
     ),
     "terminal_conditions": (TimeoutCondition(MAX_EP_STEPS), GoalScoredCondition()),
 }
@@ -100,9 +100,9 @@ if __name__ == '__main__':
                 "num_agents": 2
             },
             # algorithm settings
-            "model": {
-                "vf_share_layers": True,
-            },
+            # "model": {
+            #     "vf_share_layers": True,
+            # },
             # "lr": 5e-5,
             # "lambda": 0.95,
             # "kl_coeff": 0.2,
