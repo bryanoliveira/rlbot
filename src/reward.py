@@ -1,6 +1,6 @@
 import numpy as np
 
-from rlgym.utils.reward_functions.common_rewards import EventReward
+from rlgym.utils.reward_functions.common_rewards import EventReward, ConditionalRewardFunction
 from rlgym.utils.gamestates import GameState, PlayerData
 
 
@@ -32,3 +32,11 @@ class TimeLeftEventReward(EventReward):
 
         self.last_registered_values[player.car_id] = new_values
         return reward
+
+class RewardIfFacingBall(ConditionalRewardFunction):
+    def condition(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> float:
+        pos_diff = state.ball.position - player.car_data.position
+        norm_pos_diff = pos_diff / np.linalg.norm(pos_diff)
+        cond = float(np.dot(player.car_data.forward(), norm_pos_diff)) > 0.7
+        print(cond)
+        return cond

@@ -26,8 +26,12 @@ from ray.tune.registry import get_trainable_cls, _global_registry, ENV_CREATOR
 import rlgym
 from rlgym.utils.obs_builders import AdvancedObs
 from rlgym.utils.reward_functions import CombinedReward
-from rlgym.utils.reward_functions.common_rewards import VelocityPlayerToBallReward, VelocityBallToGoalReward
+from rlgym.utils.reward_functions.common_rewards import *
+from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition, GoalScoredCondition
 from rlgym_tools.rllib_utils import RLLibEnv
+
+from reward import TimeLeftEventReward, RewardIfFacingBall
+
 
 EXAMPLE_USAGE = """
 Example usage via RLlib CLI:
@@ -51,18 +55,35 @@ Example usage w/o checkpoint (for testing purposes):
 # ModelCatalog.register_custom_model("pa_model", ParametricActionsModel)
 # register_env("pa_cartpole", lambda _: ParametricActionsCartPole(10))
 
+MAX_EP_SECS = 15
+DEFAULT_TICK_SKIP = 8
+PHYSICS_TICKS_PER_SECOND = 120
+MAX_EP_STEPS = int(round(MAX_EP_SECS * PHYSICS_TICKS_PER_SECOND / DEFAULT_TICK_SKIP))
+ENV_CONFIG = {
+    "self_play": True,
+    "team_size": 1,
+    "game_speed": 1,
+    "obs_builder": AdvancedObs(),
+    "reward_fn": CombinedReward(
+        (
+            TimeLeftEventReward(goal=1, concede=-1, shot=0.01, save=0.01),
+            # LiuDistanceBallToGoalReward(),
+            VelocityBallToGoalReward(),
+            # RewardIfBehindBall(TouchBallReward()),
+            # LiuDistancePlayerToBallReward(),
+            RewardIfFacingBall(VelocityPlayerToBallReward()),
+            # AlignBallGoal(),
+            # RewardIfBehindBall(FaceBallReward()),
+            # VelocityReward(),
+            ConstantReward(),
+        ),
+        (1, 5, 0.05, -0.1)
+    ),
+    "terminal_conditions": (TimeoutCondition(MAX_EP_STEPS), GoalScoredCondition()),
+}
+
 def create_env(env_config):
-    return RLLibEnv(
-        rlgym.make(
-            self_play=True,
-            game_speed=1,
-            obs_builder=AdvancedObs(),
-            reward_fn=CombinedReward(
-                (VelocityBallToGoalReward(), VelocityPlayerToBallReward()), 
-                (0.7, 0.3)
-            )
-        )
-    )
+    return RLLibEnv(rlgym.make(**ENV_CONFIG))
 
 
 register_env("RLGym", create_env)

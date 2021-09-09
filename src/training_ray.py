@@ -19,18 +19,18 @@ from rlgym.utils.reward_functions import CombinedReward
 from rlgym.utils.reward_functions.common_rewards import *
 from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition, GoalScoredCondition
 from rlgym_tools.rllib_utils import RLLibEnv
-import wandb
-from reward import TimeLeftEventReward
+
+from reward import TimeLeftEventReward, RewardIfFacingBall
 
 
-MAX_EP_SECS = 10
+MAX_EP_SECS = 15
 DEFAULT_TICK_SKIP = 8
 PHYSICS_TICKS_PER_SECOND = 120
 MAX_EP_STEPS = int(round(MAX_EP_SECS * PHYSICS_TICKS_PER_SECOND / DEFAULT_TICK_SKIP))
 ENV_CONFIG = {
     "self_play": True,
     "team_size": 1,
-    "game_speed": 100,
+    "game_speed": 1,
     "obs_builder": AdvancedObs(),
     "reward_fn": CombinedReward(
         (
@@ -39,13 +39,13 @@ ENV_CONFIG = {
             VelocityBallToGoalReward(),
             # RewardIfBehindBall(TouchBallReward()),
             # LiuDistancePlayerToBallReward(),
-            VelocityPlayerToBallReward(),
+            RewardIfFacingBall(VelocityPlayerToBallReward()),
             # AlignBallGoal(),
             # RewardIfBehindBall(FaceBallReward()),
             # VelocityReward(),
             ConstantReward(),
         ),
-        (1, 1, 0.05, -0.01)
+        (1, 5, 0.05, -0.1)
     ),
     "terminal_conditions": (TimeoutCondition(MAX_EP_STEPS), GoalScoredCondition()),
 }
@@ -79,8 +79,10 @@ if __name__ == '__main__':
     # policy = PPOTorchPolicy, Box(-np.inf, np.inf, (4,)), Discrete(2), {}
     
     analysis = tune.run(
-        "PPO", # "SAC",
-        name="PPO_multiagent_2", # name="SAC_multiagent_2",
+        "PPO",
+        name="PPO_multiagent_2",
+        # "SAC",
+        # name="SAC_multiagent_2",
         config={
             # system settings
             "num_gpus": 1,
