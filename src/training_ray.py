@@ -15,7 +15,43 @@ import rlgym
 from rlgym.utils.obs_builders import AdvancedObs
 from rlgym.utils.reward_functions import CombinedReward
 from rlgym.utils.reward_functions.common_rewards import *
+from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition, GoalScoredCondition
 from rlgym_tools.rllib_utils import RLLibEnv
+
+MAX_EP_SECS = 10
+DEFAULT_TICK_SKIP = 8
+PHYSICS_TICKS_PER_SECOND = 120
+MAX_EP_STEPS = int(round(MAX_EP_SECS * PHYSICS_TICKS_PER_SECOND / DEFAULT_TICK_SKIP))
+
+
+class CustomEventReward(EventReward):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.timestep = 0
+
+    def reset(self, *args, **kwargs):
+        super().reset(*args, **kwargs)
+        self.timestep = 0
+
+    def get_reward(self, player: PlayerData, state: GameState, previous_action: np.ndarray, optional_data=None):
+        self.timestep += 1
+
+        old_values = self.last_registered_values[player.car_id]
+        new_values = self._extract_values(player, state)
+
+        diff_values = new_values - old_values
+        diff_values[diff_values < 0] = 0  # We only care about increasing values
+
+        # copy original weights
+        weights = np.array(self.weights)
+        # weight goal reward by the remaining timesteps
+        weights[0] *= MAX_EP_STEPS - self.timestep
+        weights[2] *= MAX_EP_STEPS - self.timestep
+        reward = np.dot(weights, diff_values)
+
+        self.last_registered_values[player.car_id] = new_values
+        return reward
+
 
 if __name__ == '__main__':
     ray.init(address='auto', _redis_password='5241590000000000', logging_level=logging.DEBUG)
@@ -29,17 +65,20 @@ if __name__ == '__main__':
                 obs_builder=AdvancedObs(),
                 reward_fn=CombinedReward(
                     (
-                        LiuDistanceBallToGoalReward(), # 0.01
-                        VelocityBallToGoalReward(), # 0.01
-                        TouchBallReward(), # 0.005
-                        LiuDistancePlayerToBallReward(), # 0.0005
-                        VelocityPlayerToBallReward(), # 0.0005
-                        AlignBallGoal(), # 0.0001
-                        FaceBallReward(), # 0.0001
-                        VelocityReward(), # 0.0001
-                    ), 
-                    (0.01, 0.01, 0.005, 0.0005, 0.0005, 0.0001, 0.0001, 0.0001)
-                )
+                        CustomEventReward(goal=1, concede=-1, shot=0.01, save=0.01),
+                        # LiuDistanceBallToGoalReward(),
+                        VelocityBallToGoalReward(),
+                        # RewardIfBehindBall(TouchBallReward()),
+                        # LiuDistancePlayerToBallReward(),
+                        # VelocityPlayerToBallReward(),
+                        # AlignBallGoal(),
+                        # RewardIfBehindBall(FaceBallReward()),
+                        # VelocityReward(),
+                        ConstantReward(),
+                    ),
+                    (1, 1, -0.01)
+                ),
+                terminal_conditions=(TimeoutCondition(MAX_EP_STEPS), GoalScoredCondition()),
             )
         )
 
