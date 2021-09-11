@@ -2,11 +2,13 @@ import logging
 
 import numpy as np
 import ray
-from gym.spaces import Box, Discrete
-from ray.rllib.agents.sac import SACTorchPolicy
-from ray.rllib.agents.ppo import PPOTorchPolicy
 from ray import tune
 from ray.tune import register_env
+from ray.rllib.agents.callbacks import DefaultCallbacks
+from ray.rllib.agents.sac import SACTorchPolicy
+from ray.rllib.agents.ppo import PPOTorchPolicy
+from ray.rllib.agents.ddpg.ddpg_torch_policy import DDPGTorchPolicy
+from gym.spaces import Box, Discrete
 import rlgym
 from rlgym.gamelaunch import LaunchPreference
 from rlgym.utils.obs_builders import AdvancedObs
@@ -60,22 +62,48 @@ def json_dumper(obj):
         except:
             return str(obj)
 
+def policy_mapping_fn(agent_id, *args, **kwargs):
+    if agent_id == 0:
+        return "learning_agent" # Choose 01 policy for agent_01
+    else:
+        return np.random.choice(
+            ["learning_agent", "opponent_1", "opponent_2", "opponent_3"], 
+            size=1,
+            p=[0.85, 0.05, 0.05, 0.05]
+        )[0]
+
+class SelfPlayUpdateCallback(DefaultCallbacks):
+    def on_train_result(self, **info):
+        """
+        Update multiagent oponent weights when reward is high enough
+        """
+        if info["result"]["episode_reward_mean"] > 30:
+            print("---- Updating opponents!!! ----")
+            trainer = info["trainer"]
+            trainer.set_weights({
+                "opponent_3": trainer.get_weights(["opponent_2"])["opponent_2"],
+                "opponent_2": trainer.get_weights(["opponent_1"])["opponent_1"],
+                "opponent_1": trainer.get_weights(["learning_agent"])["learning_agent"],
+            })
+    
 
 if __name__ == '__main__':
     ray.init(address='auto', _redis_password='5241590000000000', logging_level=logging.DEBUG)
 
-    def create_env(env_config):
+    def create_env(*_):
+        """
+        Instantiate the environment and wrap it in an RLLibEnv, ignoring args.
+        """
         return RLLibEnv(rlgym.make(**ENV_CONFIG))
 
     register_env("RLGym", create_env)
-
-    policy = PPOTorchPolicy, Box(-np.inf, np.inf, (107,)), Box(-1.0, 1.0, (8,)), {}
-    # policy = SACTorchPolicy, Box(-np.inf, np.inf, (107,)), Box(-1.0, 1.0, (8,)), {}
-    # policy = PPOTorchPolicy, Box(-np.inf, np.inf, (4,)), Discrete(2), {}
+    obs_space = Box(-np.inf, np.inf, (107,))
+    act_space = Box(-1.0, 1.0, (8,))
+    # action_space = Discrete(8,) # e.g. curiosity
 
     analysis = tune.run(
         "PPO",
-        name="PPO_multiagent_2",
+        name="PPO_selfplay_1",
         # "SAC",
         # name="SAC_multiagent_3",
         config={
@@ -86,20 +114,24 @@ if __name__ == '__main__':
             # "num_envs_per_worker": 1,
             "log_level": "INFO",
             "framework": "torch",
-            # RL setuptingsup
+            "callbacks": SelfPlayUpdateCallback,
+            # RL setup
             "multiagent": {
-                "policies": {"policy": policy},
-                "policy_mapping_fn": (lambda agent_id, **kwargs: "policy"),
-                "policies_to_train": ["policy"],
+                "policies": {
+                    "learning_agent": (None, obs_space, act_space, {}),
+                    "opponent_1": (None, obs_space, act_space, {}),
+                    "opponent_2": (None, obs_space, act_space, {}),
+                    "opponent_3": (None, obs_space, act_space, {}),
+                },
+                "policy_mapping_fn": tune.function(policy_mapping_fn),
+                "policies_to_train": ["learning_agent"],
             },
             "env": "RLGym",
-            "env_config": {
-                "num_agents": 2
-            },
             # algorithm settings
-            # "model": {
-            #     "vf_share_layers": True,
-            # },
+            "model": {
+                "vf_share_layers": True,
+            },
+            "vf_loss_coeff": tune.grid_search([0.33, 0.66, 1.0, 1.33]),
             # "lr": 5e-5,
             # "lambda": 0.95,
             # "kl_coeff": 0.2,
@@ -110,27 +142,27 @@ if __name__ == '__main__':
             # "sgd_minibatch_size": 500,
             # "num_sgd_iter": 10,
             # "batch_mode": "truncate_episodes",
-            "exploration_config": {
-                "type": "Curiosity",  # <- Use the Curiosity module for exploring.
-                "eta": 1.0,  # Weight for intrinsic rewards before being added to extrinsic ones.
-                "lr": 0.001,  # Learning rate of the curiosity (ICM) module.
-                "feature_dim": 288,  # Dimensionality of the generated feature vectors.
-                # Setup of the feature net (used to encode observations into feature (latent) vectors).
-                "feature_net_config": {
-                    "fcnet_hiddens": [],
-                    "fcnet_activation": "relu",
-                },
-                "inverse_net_hiddens": [256],  # Hidden layers of the "inverse" model.
-                "inverse_net_activation": "relu",  # Activation of the "inverse" model.
-                "forward_net_hiddens": [256],  # Hidden layers of the "forward" model.
-                "forward_net_activation": "relu",  # Activation of the "forward" model.
-                "beta": 0.2,  # Weight for the "forward" loss (beta) over the "inverse" loss (1.0 - beta).
-                # Specify, which exploration sub-type to use (usually, the algo's "default"
-                # exploration, e.g. EpsilonGreedy for DQN, StochasticSampling for PG/SAC).
-                "sub_exploration": {
-                    "type": "StochasticSampling",
-                }
-            }
+            # "exploration_config": {
+            #     "type": "Curiosity",  # <- Use the Curiosity module for exploring.
+            #     "eta": 50.0,  # Weight for intrinsic rewards before being added to extrinsic ones.
+            #     "lr": 0.0003,  # Learning rate of the curiosity (ICM) module.
+            #     "feature_dim": 64,  # Dimensionality of the generated feature vectors.
+            #     # Setup of the feature net (used to encode observations into feature (latent) vectors).
+            #     "feature_net_config": {
+            #         "fcnet_hiddens": [256],
+            #         "fcnet_activation": "relu",
+            #     },
+            #     "inverse_net_hiddens": [256],  # Hidden layers of the "inverse" model.
+            #     "inverse_net_activation": "relu",  # Activation of the "inverse" model.
+            #     "forward_net_hiddens": [256],  # Hidden layers of the "forward" model.
+            #     "forward_net_activation": "relu",  # Activation of the "forward" model.
+            #     "beta": 0.2,  # Weight for the "forward" loss (beta) over the "inverse" loss (1.0 - beta).
+            #     # Specify, which exploration sub-type to use (usually, the algo's "default"
+            #     # exploration, e.g. EpsilonGreedy for DQN, StochasticSampling for PG/SAC).
+            #     "sub_exploration": {
+            #         "type": "StochasticSampling",
+            #     }
+            # }
         },
         stop={
             "training_iteration": 10000,

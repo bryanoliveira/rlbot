@@ -26,8 +26,8 @@ class TimeLeftEventReward(EventReward):
         # copy original weights
         weights = np.array(self.weights)
         # weight goal reward by the remaining timesteps
-        weights[0] *= self.max_timesteps - self.timestep
-        weights[2] *= self.max_timesteps - self.timestep
+        weights[0] *= max(self.max_timesteps - self.timestep, 5)
+        weights[2] *= max(self.max_timesteps - self.timestep, 5)
         reward = np.dot(weights, diff_values)
 
         self.last_registered_values[player.car_id] = new_values
