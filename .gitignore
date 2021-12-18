@@ -1,4 +1,5 @@
 ray_results/
+sb3_results/
 wandb
 *.pdf
 

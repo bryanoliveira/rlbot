@@ -24,14 +24,8 @@ from ray.tune.utils import merge_dicts
 from ray.tune.registry import get_trainable_cls, _global_registry, ENV_CREATOR
 
 import rlgym
-from rlgym.gamelaunch import LaunchPreference
-from rlgym.utils.obs_builders import AdvancedObs
-from rlgym.utils.reward_functions import CombinedReward
-from rlgym.utils.reward_functions.common_rewards import *
-from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition, GoalScoredCondition
 from rlgym_tools.rllib_utils import RLLibEnv
-
-from reward import TimeLeftEventReward, RewardIfFacingBall
+from training_ray import ENV_CONFIG
 
 
 EXAMPLE_USAGE = """
@@ -56,33 +50,6 @@ Example usage w/o checkpoint (for testing purposes):
 # ModelCatalog.register_custom_model("pa_model", ParametricActionsModel)
 # register_env("pa_cartpole", lambda _: ParametricActionsCartPole(10))
 
-MAX_EP_SECS = 15
-DEFAULT_TICK_SKIP = 8
-PHYSICS_TICKS_PER_SECOND = 120
-MAX_EP_STEPS = int(round(MAX_EP_SECS * PHYSICS_TICKS_PER_SECOND / DEFAULT_TICK_SKIP))
-ENV_CONFIG = {
-    "self_play": True,
-    "team_size": 1,
-    "game_speed": 1,
-    "launch_preference": LaunchPreference.STEAM,
-    "obs_builder": AdvancedObs(),
-    "reward_fn": CombinedReward(
-        (
-            TimeLeftEventReward(goal=1, concede=-1, shot=0.01, save=0.01),
-            # LiuDistanceBallToGoalReward(),
-            VelocityBallToGoalReward(),
-            # RewardIfBehindBall(TouchBallReward()),
-            # LiuDistancePlayerToBallReward(),
-            RewardIfFacingBall(VelocityPlayerToBallReward()),
-            # AlignBallGoal(),
-            # RewardIfBehindBall(FaceBallReward()),
-            # VelocityReward(),
-            ConstantReward(),
-        ),
-        (1, 5, 0.05, -0.1)
-    ),
-    "terminal_conditions": (TimeoutCondition(MAX_EP_STEPS), GoalScoredCondition()),
-}
 
 def create_env(env_config):
     return RLLibEnv(rlgym.make(**ENV_CONFIG))
@@ -95,16 +62,17 @@ def create_parser(parser_creator=None):
     parser_creator = parser_creator or argparse.ArgumentParser
     parser = parser_creator(
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Roll out a reinforcement learning agent "
-        "given a checkpoint.",
-        epilog=EXAMPLE_USAGE)
+        description="Roll out a reinforcement learning agent " "given a checkpoint.",
+        epilog=EXAMPLE_USAGE,
+    )
 
     parser.add_argument(
         "checkpoint",
         type=str,
         nargs="?",
         help="(Optional) checkpoint from which to roll out. "
-        "If none given, will use an initial (untrained) Trainer.")
+        "If none given, will use an initial (untrained) Trainer.",
+    )
 
     required_named = parser.add_argument_group("required named arguments")
     required_named.add_argument(
@@ -114,41 +82,48 @@ def create_parser(parser_creator=None):
         help="The algorithm or model to train. This may refer to the name "
         "of a built-on algorithm (e.g. RLLib's `DQN` or `PPO`), or a "
         "user-defined trainable function or class registered in the "
-        "tune registry.")
+        "tune registry.",
+    )
     required_named.add_argument(
         "--env",
         type=str,
         help="The environment specifier to use. This could be an openAI gym "
         "specifier (e.g. `CartPole-v0`) or a full class-path (e.g. "
-        "`ray.rllib.examples.env.simple_corridor.SimpleCorridor`).")
+        "`ray.rllib.examples.env.simple_corridor.SimpleCorridor`).",
+    )
     parser.add_argument(
         "--local-mode",
         action="store_true",
-        help="Run ray in local mode for easier debugging.")
+        help="Run ray in local mode for easier debugging.",
+    )
     parser.add_argument(
         "--no-render",
         default=False,
         action="store_const",
         const=True,
-        help="Suppress rendering of the environment.")
+        help="Suppress rendering of the environment.",
+    )
     parser.add_argument(
         "--video-dir",
         type=str,
         default=None,
         help="Specifies the directory into which videos of all episode "
-        "rollouts will be stored.")
+        "rollouts will be stored.",
+    )
     parser.add_argument(
         "--steps",
         default=10000,
         help="Number of timesteps to roll out. Rollout will also stop if "
         "`--episodes` limit is reached first. A value of 0 means no "
-        "limitation on the number of timesteps run.")
+        "limitation on the number of timesteps run.",
+    )
     parser.add_argument(
         "--episodes",
         default=0,
         help="Number of complete episodes to roll out. Rollout will also stop "
         "if `--steps` (timesteps) limit is reached first. A value of 0 means "
-        "no limitation on the number of episodes run.")
+        "no limitation on the number of episodes run.",
+    )
     parser.add_argument("--out", default=None, help="Output filename.")
     parser.add_argument(
         "--config",
@@ -156,26 +131,30 @@ def create_parser(parser_creator=None):
         type=json.loads,
         help="Algorithm-specific configuration (e.g. env, hyperparams). "
         "Gets merged with loaded configuration from checkpoint file and "
-        "`evaluation_config` settings therein.")
+        "`evaluation_config` settings therein.",
+    )
     parser.add_argument(
         "--save-info",
         default=False,
         action="store_true",
         help="Save the info field generated by the step() method, "
-        "as well as the action, observations, rewards and done fields.")
+        "as well as the action, observations, rewards and done fields.",
+    )
     parser.add_argument(
         "--use-shelve",
         default=False,
         action="store_true",
         help="Save rollouts into a python shelf file (will save each episode "
-        "as it is generated). An output filename must be set using --out.")
+        "as it is generated). An output filename must be set using --out.",
+    )
     parser.add_argument(
         "--track-progress",
         default=False,
         action="store_true",
         help="Write progress to a temporary file (updated "
         "after each episode). An output filename must be set using --out; "
-        "the progress file will live in the same folder.")
+        "the progress file will live in the same folder.",
+    )
     return parser
 
 
@@ -198,13 +177,15 @@ class RolloutSaver:
     If outfile is None, this class does nothing.
     """
 
-    def __init__(self,
-                 outfile=None,
-                 use_shelve=False,
-                 write_update_file=False,
-                 target_steps=None,
-                 target_episodes=None,
-                 save_info=False):
+    def __init__(
+        self,
+        outfile=None,
+        use_shelve=False,
+        write_update_file=False,
+        target_steps=None,
+        target_episodes=None,
+        save_info=False,
+    ):
         self._outfile = outfile
         self._update_file = None
         self._use_shelve = use_shelve
@@ -240,13 +221,15 @@ class RolloutSaver:
                     with open(self._outfile, "wb") as _:
                         pass
                 except IOError as x:
-                    print("Can not open {} for writing - cancelling rollouts.".
-                          format(self._outfile))
+                    print(
+                        "Can not open {} for writing - cancelling rollouts.".format(
+                            self._outfile
+                        )
+                    )
                     raise x
             if self._write_update_file:
                 # Open a file to track rollout progress:
-                self._update_file = self._get_tmp_progress_filename().open(
-                    mode="w")
+                self._update_file = self._get_tmp_progress_filename().open(mode="w")
         return self
 
     def __exit__(self, type, value, traceback):
@@ -264,11 +247,13 @@ class RolloutSaver:
 
     def _get_progress(self):
         if self._target_episodes:
-            return "{} / {} episodes completed".format(self._num_episodes,
-                                                       self._target_episodes)
+            return "{} / {} episodes completed".format(
+                self._num_episodes, self._target_episodes
+            )
         elif self._target_steps:
-            return "{} / {} steps completed".format(self._total_steps,
-                                                    self._target_steps)
+            return "{} / {} steps completed".format(
+                self._total_steps, self._target_steps
+            )
         else:
             return "{} episodes completed".format(self._num_episodes)
 
@@ -295,10 +280,10 @@ class RolloutSaver:
         if self._outfile:
             if self._save_info:
                 self._current_rollout.append(
-                    [obs, action, next_obs, reward, done, info])
+                    [obs, action, next_obs, reward, done, info]
+                )
             else:
-                self._current_rollout.append(
-                    [obs, action, next_obs, reward, done])
+                self._current_rollout.append([obs, action, next_obs, reward, done])
         self._total_steps += 1
 
 
@@ -323,7 +308,8 @@ def run(args, parser):
             raise ValueError(
                 "Could not find params.pkl in either the checkpoint dir or "
                 "its parent directory AND no `--config` given on command "
-                "line!")
+                "line!"
+            )
 
         # Use default config for given agent.
         _, config = get_trainer_class(args.run, return_config=True)
@@ -334,8 +320,8 @@ def run(args, parser):
     # Merge with `evaluation_config` (first try from command line, then from
     # pkl file).
     evaluation_config = copy.deepcopy(
-        args.config.get("evaluation_config", config.get(
-            "evaluation_config", {})))
+        args.config.get("evaluation_config", config.get("evaluation_config", {}))
+    )
     config = merge_dicts(config, evaluation_config)
     # Merge with command line `--config` settings (if not already the same
     # anyways).
@@ -374,14 +360,16 @@ def run(args, parser):
 
     # Do the actual rollout.
     with RolloutSaver(
-            args.out,
-            args.use_shelve,
-            write_update_file=args.track_progress,
-            target_steps=num_steps,
-            target_episodes=num_episodes,
-            save_info=args.save_info) as saver:
-        rollout(agent, args.env, num_steps, num_episodes, saver,
-                args.no_render, video_dir)
+        args.out,
+        args.use_shelve,
+        write_update_file=args.track_progress,
+        target_steps=num_steps,
+        target_episodes=num_episodes,
+        save_info=args.save_info,
+    ) as saver:
+        rollout(
+            agent, args.env, num_steps, num_episodes, saver, args.no_render, video_dir
+        )
     agent.stop()
 
 
@@ -409,13 +397,15 @@ def keep_going(steps, num_steps, episodes, num_episodes):
     return True
 
 
-def rollout(agent,
-            env_name,
-            num_steps,
-            num_episodes=0,
-            saver=None,
-            no_render=True,
-            video_dir=None):
+def rollout(
+    agent,
+    env_name,
+    num_steps,
+    num_episodes=0,
+    saver=None,
+    no_render=True,
+    video_dir=None,
+):
     policy_agent_mapping = default_policy_agent_mapping
 
     if saver is None:
@@ -424,7 +414,8 @@ def rollout(agent,
     # Normal case: Agent was setup correctly with an evaluation WorkerSet,
     # which we will now use to rollout.
     if hasattr(agent, "evaluation_workers") and isinstance(
-            agent.evaluation_workers, WorkerSet):
+        agent.evaluation_workers, WorkerSet
+    ):
         steps = 0
         episodes = 0
         while keep_going(steps, num_steps, episodes, num_episodes):
@@ -435,8 +426,11 @@ def rollout(agent,
             episodes += eps
             steps += eps * eval_result["episode_len_mean"]
             # Print out results and continue.
-            print("Episode #{}: reward: {}".format(
-                episodes, eval_result["episode_reward_mean"]))
+            print(
+                "Episode #{}: reward: {}".format(
+                    episodes, eval_result["episode_reward_mean"]
+                )
+            )
             saver.end_rollout()
         return
 
@@ -445,8 +439,7 @@ def rollout(agent,
         env = agent.workers.local_worker().env
         multiagent = isinstance(env, MultiAgentEnv)
         if agent.workers.local_worker().multiagent:
-            policy_agent_mapping = agent.config["multiagent"][
-                "policy_mapping_fn"]
+            policy_agent_mapping = agent.config["multiagent"]["policy_mapping_fn"]
         policy_map = agent.workers.local_worker().policy_map
         state_init = {p: m.get_initial_state() for p, m in policy_map.items()}
         use_lstm = {p: len(s) > 0 for p, s in state_init.items()}
@@ -454,15 +447,14 @@ def rollout(agent,
     # Agent has neither evaluation- nor rollout workers.
     else:
         from gym import envs
+
         if envs.registry.env_specs.get(agent.config["env"]):
             # if environment is gym environment, load from gym
             env = gym.make(agent.config["env"])
         else:
             # if environment registered ray environment, load from ray
-            env_creator = _global_registry.get(ENV_CREATOR,
-                                               agent.config["env"])
-            env_context = EnvContext(
-                agent.config["env_config"] or {}, worker_index=0)
+            env_creator = _global_registry.get(ENV_CREATOR, agent.config["env"])
+            env_context = EnvContext(agent.config["env_config"] or {}, worker_index=0)
             env = env_creator(env_context)
         multiagent = False
         try:
@@ -470,7 +462,8 @@ def rollout(agent,
         except AttributeError:
             raise AttributeError(
                 "Agent ({}) does not have a `policy` property! This is needed "
-                "for performing (trained) agent rollouts.".format(agent))
+                "for performing (trained) agent rollouts.".format(agent)
+            )
         use_lstm = {DEFAULT_POLICY_ID: False}
 
     action_init = {
@@ -482,10 +475,8 @@ def rollout(agent,
     # gym monitor, which is set to record every episode.
     if video_dir:
         env = gym_wrappers.Monitor(
-            env=env,
-            directory=video_dir,
-            video_callable=lambda _: True,
-            force=True)
+            env=env, directory=video_dir, video_callable=lambda _: True, force=True
+        )
 
     steps = 0
     episodes = 0
@@ -494,20 +485,22 @@ def rollout(agent,
         saver.begin_rollout()
         obs = env.reset()
         agent_states = DefaultMapping(
-            lambda agent_id: state_init[mapping_cache[agent_id]])
+            lambda agent_id: state_init[mapping_cache[agent_id]]
+        )
         prev_actions = DefaultMapping(
-            lambda agent_id: action_init[mapping_cache[agent_id]])
-        prev_rewards = collections.defaultdict(lambda: 0.)
+            lambda agent_id: action_init[mapping_cache[agent_id]]
+        )
+        prev_rewards = collections.defaultdict(lambda: 0.0)
         done = False
         reward_total = 0.0
-        while not done and keep_going(steps, num_steps, episodes,
-                                      num_episodes):
+        while not done and keep_going(steps, num_steps, episodes, num_episodes):
             multi_obs = obs if multiagent else {_DUMMY_AGENT_ID: obs}
             action_dict = {}
             for agent_id, a_obs in multi_obs.items():
                 if a_obs is not None:
                     policy_id = mapping_cache.setdefault(
-                        agent_id, policy_agent_mapping(agent_id))
+                        agent_id, policy_agent_mapping(agent_id)
+                    )
                     p_use_lstm = use_lstm[policy_id]
                     if p_use_lstm:
                         a_action, p_state, _ = agent.compute_single_action(
@@ -515,14 +508,16 @@ def rollout(agent,
                             state=agent_states[agent_id],
                             prev_action=prev_actions[agent_id],
                             prev_reward=prev_rewards[agent_id],
-                            policy_id=policy_id)
+                            policy_id=policy_id,
+                        )
                         agent_states[agent_id] = p_state
                     else:
                         a_action = agent.compute_single_action(
                             a_obs,
                             prev_action=prev_actions[agent_id],
                             prev_reward=prev_rewards[agent_id],
-                            policy_id=policy_id)
+                            policy_id=policy_id,
+                        )
                     a_action = flatten_to_single_ndarray(a_action)
                     action_dict[agent_id] = a_action
                     prev_actions[agent_id] = a_action
@@ -538,8 +533,7 @@ def rollout(agent,
 
             if multiagent:
                 done = done["__all__"]
-                reward_total += sum(
-                    r for r in reward.values() if r is not None)
+                reward_total += sum(r for r in reward.values() if r is not None)
             else:
                 reward_total += reward
             if not no_render:
@@ -561,12 +555,14 @@ def main():
     if args.use_shelve and not args.out:
         raise ValueError(
             "If you set --use-shelve, you must provide an output file via "
-            "--out as well!")
+            "--out as well!"
+        )
     # --track-progress w/o --out option.
     if args.track_progress and not args.out:
         raise ValueError(
             "If you set --track-progress, you must provide an output file via "
-            "--out as well!")
+            "--out as well!"
+        )
 
     run(args, parser)
 
